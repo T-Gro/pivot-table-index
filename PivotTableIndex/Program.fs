@@ -2,6 +2,7 @@
 module PivotTableProgram
 open System
 
+
 let inline square x = x * x
 let inline vSnd (struct(_,y)) = y
 
@@ -19,7 +20,7 @@ module VectorOperations =
         |> Array.sumBy square
         |> sqrt
 
-    let normalizeVector (vector: Vector) = 
+    let normalizeVector (vector: Vector) =         
         let sum = vectorLength vector
         if sum = 0.0 || sum = 1.0 then 
             vector
@@ -39,7 +40,7 @@ module PivotTable =
     type Pivots = NormalizedVector array
     type DB = { Pivots : NormalizedVector array; PivotTable : Distance array array; Database : NormalizedVector array }
 
-    type ResultsAccumulator = SortedSet<struct(int * Distance)>
+    type ResultsAccumulator = SortedSet<(int * Distance)>
 
     let pickPivots (dataset: NormalizedVector array) (pivotCount: int) = 
         let random = Random(42)
@@ -75,7 +76,7 @@ module PivotTable =
             let currentMaxDistance : Distance =
                 match resultsSoFar.Count with
                 | 0 -> Double.MaxValue
-                | _ -> resultsSoFar.Max |> vSnd
+                | _ -> resultsSoFar.Max |> snd
 
             // We can stop as soon as the lowerbound (= always lower) is higher than the current Kth result
             if currentMaxDistance <= lowerBound && resultsSoFar.Count >= k then 
@@ -86,31 +87,53 @@ module PivotTable =
                 assert(calculatedDistance >= lowerBound)
 
                 if resultsSoFar.Count < k then 
-                    resultsSoFar.Add(struct(dbIdx,calculatedDistance)) |> ignore<bool>
+                    resultsSoFar.Add((dbIdx,calculatedDistance)) |> ignore<bool>
                 else           
                     if currentMaxDistance > calculatedDistance then 
-                        resultsSoFar.Remove(resultsSoFar.Max) |> ignore<bool>
-                        resultsSoFar.Add(struct(dbIdx,calculatedDistance)) |> ignore<bool>
+                        let removed = resultsSoFar.Remove(resultsSoFar.Max)
+                        if not removed then
+                            printfn $"Could not remove max element {resultsSoFar.Max} from results"
+                        resultsSoFar.Add((dbIdx,calculatedDistance)) |> ignore<bool>
 
                 match idx + 1 with
                 | nextIdx when nextIdx < lowerBounds.Length -> fillKnnResults nextIdx resultsSoFar
                 | _ -> resultsSoFar
 
 
-        let acc = new ResultsAccumulator(ComparisonIdentity.FromFunction(fun struct(_,d1) struct(_,d2) -> if d1 < d2 then -1 else 1))
+        let acc = new ResultsAccumulator(ComparisonIdentity.FromFunction(fun (_,d1) (_,d2) -> if d1=d2 then 0 else if d1 < d2 then -1 else 1))
         fillKnnResults 0 acc
+
+module TestData = 
+    open FSharp.Data
+    open System.IO
+
+    [<Literal>]
+    let path = __SOURCE_DIRECTORY__ + "/food.json"
+    type FoodType = JsonProvider<Sample=path>
+
+    let getFoodVectors() = 
+        let fullFile = FoodType.Load(path)
+        fullFile
+        |> Array.map (fun food -> food.Embedding |> normalizeVector)
+
+    let randomData() = 
+        let rnd = new Random(2112)
+        let vectorSize = 4
+        let databaseSize = 10_000
+
+        let normalizedDataset = 
+            Array.init databaseSize (fun _ -> 
+                Array.init vectorSize (fun _ -> rnd.NextDouble()) |> normalizeVector)
+
+        normalizedDataset
 
 
 [<EntryPoint>]
-let main argv =
-    let rnd = new Random(2112)
-    let vectorSize = 4
-    let databaseSize = 10_000
-    let pivotCount = 15
+let main argv =    
 
-    let normalizedDataset = 
-        Array.init databaseSize (fun _ -> 
-            Array.init vectorSize (fun _ -> rnd.NextDouble()) |> VectorOperations.normalizeVector)
+    let pivotCount = 72
+    let normalizedDataset = TestData.getFoodVectors()
+
 
     printfn "Random dataset created"
     printfn "------------------------"
@@ -121,7 +144,8 @@ let main argv =
     printfn "Index  created"
     printfn "------------------------"
 
-    let sampleQueries = Array.init 100 (fun _ -> normalizedDataset[rnd.Next(normalizedDataset.Length)])
+    let rnd = new Random(2112)
+    let sampleQueries = Array.init 10 (fun _ -> normalizedDataset[rnd.Next(normalizedDataset.Length)])
 
     for q in sampleQueries do
         let res = PivotTable.knnQuery (q, db, 10)
