@@ -32,7 +32,7 @@ module DistanceFunctions =
     let euclidean (v1 : NormalizedVector) (v2: NormalizedVector) : Distance = 
         let mutable sum = 0.0
         (v1, v2) ||> Array.iter2 (fun x y -> sum <- sum + ((x - y) |> square))
-        sqrt sum
+        sum |> square |> square
 
 module PivotTable = 
     open System.Collections.Generic
@@ -42,17 +42,41 @@ module PivotTable =
 
     type ResultsAccumulator = SortedSet<(int * Distance)>
 
-    let pickPivots (dataset: NormalizedVector array) (pivotCount: int) = 
-        let random = Random(42)
-        Array.init pivotCount (fun _ -> 
-            let randomIndex = random.Next(0, dataset.Length)
-            dataset.[randomIndex])
+    let createIndex (pivotCount: int) (dataset: NormalizedVector array) : DB = 
 
-    let createIndex (pivots:Pivots, dataset: NormalizedVector array) : DB = 
-        let idx = 
-            dataset
-            |> Array.map (fun v -> pivots |> Array.map (DistanceFunctions.euclidean v))
+        let idx = Array.init dataset.Length (fun _ -> Array.zeroCreate pivotCount)
+        let pivots = Array.zeroCreate pivotCount
+        let pivotIds = Array.zeroCreate pivotCount
+
+        let addPivot n (datasetId: int) =             
+            let pivot = dataset[datasetId]
+            pivots.[n] <- pivot
+            dataset |> Array.iteri (fun rowIdx v -> idx.[rowIdx].[n] <- DistanceFunctions.euclidean pivot v )          
+            pivotIds.[n] <- n
+            
+        addPivot 0 0
+        for newPivotNumber=1 to pivotCount-1 do
+            
+            let mutable maxDistance : Distance = Double.MinValue
+            let mutable idOfMax : int = 0
+
+            for rowIdx=1 to dataset.Length-1 do
+                if pivotIds |> Array.contains rowIdx then 
+                    ()                
+                else
+                    let mutable distanceToExistingPivots : Distance = 0.0
+                    for existingPivotIdx=0 to newPivotNumber-1 do
+                        distanceToExistingPivots <- distanceToExistingPivots + (square idx.[rowIdx].[existingPivotIdx])
+              
+                    if distanceToExistingPivots > maxDistance then 
+                        maxDistance <- distanceToExistingPivots
+                        idOfMax <- rowIdx
+
+            printfn $"{newPivotNumber}th pivot is {idOfMax}. Average distance is {maxDistance / float newPivotNumber} "
+            addPivot newPivotNumber idOfMax         
+
         { Pivots = pivots; PivotTable = idx; Database = dataset}
+
 
     let inline createLowerBounds (db : DB) (distanceToQuery)  = 
         let distancesToPivots = db.Pivots |> Array.map distanceToQuery
@@ -131,21 +155,19 @@ module TestData =
 [<EntryPoint>]
 let main argv =    
 
-    let pivotCount = 72
+    let pivotCount = 20
     let normalizedDataset = TestData.getFoodVectors()
 
 
     printfn "Random dataset created"
     printfn "------------------------"
-
-    let pivots = PivotTable.pickPivots normalizedDataset pivotCount
-    let db = PivotTable.createIndex (pivots, normalizedDataset)
+    let db = PivotTable.createIndex pivotCount normalizedDataset
 
     printfn "Index  created"
     printfn "------------------------"
 
     let rnd = new Random(2112)
-    let sampleQueries = Array.init 10 (fun _ -> normalizedDataset[rnd.Next(normalizedDataset.Length)])
+    let sampleQueries = Array.init 100 (fun _ -> normalizedDataset[rnd.Next(normalizedDataset.Length)])
 
     for q in sampleQueries do
         let res = PivotTable.knnQuery (q, db, 10)
