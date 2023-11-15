@@ -396,3 +396,5 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+PivotTableIndex/issues.json
+PivotTableIndex/issues-sample.json
